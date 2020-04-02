@@ -5,12 +5,21 @@ Testing the --cleanup-on-fail flag
 
 Before you do anything:
 
-1. Ensure you have Helm 2.16.5 installed
-1. Ensure you have Helmfile 0.106.3 installed
-1. Configure your client to point at the `default` namespace.
+1. Ensure you have Helm 2.16.5 and Helmfile 0.106.3 installed
+   ```
+   $ helm version
+   Client: &version.Version{SemVer:"v2.16.5", GitCommit:"89bd14c1541fa93a09492010030fd3699ca65a97", GitTreeState:"clean"}
+   Server: &version.Version{SemVer:"v2.16.5", GitCommit:"89bd14c1541fa93a09492010030fd3699ca65a97", GitTreeState:"clean"}
 
-Scenario: new resources created during upgrade get rolled back, it is possible to upgrade from there
-----------------------------------------------------------------------------------------------------
+   $ helmfile --version
+   helmfile version v0.106.3
+   ```
+1. Configure your client to point at the `default` namespace (or any other namespace you'd like).
+
+Scenario 1: Failed Upgrade
+------------------------
+
+New resources created during failed upgrade get rolled back, it is possible to upgrade from there:
 
 1. Install: 
    ```
@@ -21,7 +30,7 @@ Scenario: new resources created during upgrade get rolled back, it is possible t
    NAME            REVISION        UPDATED                         STATUS          CHART                   APP VERSION     NAMESPACE
    my-release      1               Wed Apr  1 23:03:41 2020        DEPLOYED        local-chart-0.1.0       1.0             default  
    ```
-1. Validate service, serviceaccount resources created and deploy not created:
+1. Validate serviceaccount resource created and deploy not created:
    ```   
    $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
    NAME                                    SECRETS   AGE
@@ -49,7 +58,7 @@ Scenario: new resources created during upgrade get rolled back, it is possible t
    my-release      2               Wed Apr  1 23:04:41 2020        FAILED  local-chart-0.1.0       1.0             default  
 
    ```
-    1. You can try this running the kubectl get command in another shell, while Helm's waiting for the deploy to try to finish:
+    1. You can try running the kubectl get command in another shell, while Helm's waiting for the deploy to try to finish:
        ```
        $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
        NAME                             TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
@@ -67,7 +76,7 @@ Scenario: new resources created during upgrade get rolled back, it is possible t
    $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
      
    NAME                                    SECRETS   AGE
-   serviceaccount/my-release-local-chart   1         22s
+   serviceaccount/my-release-local-chart   1         100s
    
    # ^^ NOTE: no service, deploy listed
    ```
@@ -88,5 +97,97 @@ Scenario: new resources created during upgrade get rolled back, it is possible t
    NAME                                    SECRETS   AGE
    serviceaccount/my-release-local-chart   1         22s
    
+   # ^^ NOTE: no deploy listed
+   ```
+
+
+Scenario 2: Failed Install
+--------------------------
+
+All resources created during install get left - no rollbacks. Helm delete required to run `helmfile sync` successfully:
+
+1. Ensure old release gets deleted:
+   ```
+   $ helm delete --purge my-release
+   release "my-release" deleted
+
+   $ helm ls -a my-release
+   <no results>  
+   ```
+
+1. Install with deployment and service enabled: 
+   ```
+   $ helmfile sync --set deploymentEnabled=true --set serviceEnabled=true --args "--cleanup-on-fail"
+   ...
+   
+   $ helm ls my-release
+   NAME            REVISION        UPDATED                         STATUS  CHART                   APP VERSION     NAMESPACE
+   my-release      1               Wed Apr  1 23:25:01 2020        FAILED  local-chart-0.1.0       1.0             default    
+   ```
+1. Validate all resources are created ☹️:
+   ```   
+   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   NAME                             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+   service/my-release-local-chart   ClusterIP   10.103.181.15   <none>        80/TCP    75s
+   
+   NAME                                    SECRETS   AGE
+   serviceaccount/my-release-local-chart   1         75s
+   
+   NAME                                           READY   UP-TO-DATE   AVAILABLE   AGE
+   deployment.extensions/my-release-local-chart   0/1     1            0           75s
+
+   ```
+1. Try to upgrade, enabling service but no deployment
+   ```
+   $ helmfile sync --set serviceEnabled=true --args "--cleanup-on-fail"
+   Building dependency release=my-release, chart=local-chart
+   No requirements found in local-chart/charts.
+   
+   Affected releases are:
+     my-release (./local-chart) UPDATED
+   
+   Upgrading release=my-release, chart=local-chart
+   UPGRADE FAILED
+   Error: "my-release" has no deployed releases
+   
+   
+   FAILED RELEASES:
+   NAME
+   my-release
+   in ./helmfile.yaml: failed processing release my-release: helm exited with status 1:
+     Error: UPGRADE FAILED: "my-release" has no deployed releases
+
+   
+   $ helm ls my-release
+   NAME            REVISION        UPDATED                         STATUS          CHART                   APP VERSION     NAMESPACE
+   my-release      1               Wed Apr  1 23:25:01 2020        FAILED          local-chart-0.1.0       1.0             default    
+   ```
+1. Purge the Helm release and validate the resources are removed:
+   ```
+   $ helm delete --purge my-release
+   release "my-release" deleted
+
+   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   No resources found in default namespace.
+   ```
+1. Try install again, but without deployment enabled:
+   ```
+   $ helmfile sync --set serviceEnabled=true --args "--cleanup-on-fail"
+   ...
+   UPDATED RELEASES:
+   NAME         CHART           VERSION
+   my-release   ./local-chart          
+
+   $ helm ls my-release                                                    
+   NAME            REVISION        UPDATED                         STATUS          CHART                   APP VERSION     NAMESPACE
+   my-release      1               Wed Apr  1 23:30:06 2020        DEPLOYED        local-chart-0.1.0       1.0             default
+
+   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   NAME                             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+   service/my-release-local-chart   ClusterIP   10.105.231.55   <none>        80/TCP    22s
+
+   NAME                                    SECRETS   AGE
+   serviceaccount/my-release-local-chart   1         22s
+
    # ^^ NOTE: no deploy listed
    ```
