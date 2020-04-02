@@ -1,15 +1,22 @@
 helm-cleanup-on-fail-flag
 =========================
 
-Testing the --cleanup-on-fail flag. This is a flag for `helm upgrade`, that 
+Testing the `--cleanup-on-fail` flag. This is a flag for `helm upgrade`, that when a failed upgrade occurs, will delete 
+all new resources. All existing resources will be left in their upgraded state.
 
-Rather than specify this on a project-by-project basis in helmfile.yaml, I think we'd specify it in our pipeline's 
-helmfile command with `--args "--cleanup-on-fail"`.
+It can be distinguished from `--atomic` in that atomic will actually revert all resources to their prior state (and in 
+the case of `helm install`, `--atomic` will purge the failed release altogether)
 
 The gist of our testing revealed that:
 1. It works great for allowing devs to redeploy after a failed _upgrade_.
 2. It doesn't do anything for us when the first deploy (a helm _install_) fails. Incidentally, `--atomic` seemed to 
 help out there, but I don't know what other side effects that might have.
+
+Rather than specify this on a project-by-project basis in helmfile.yaml, I think we'd specify it in our pipeline's 
+helmfile command with `--args "--cleanup-on-fail"`.
+
+Setup for testing scenarios
+---------------------------
 
 Before you do anything:
 
@@ -22,7 +29,8 @@ Before you do anything:
    $ helmfile --version
    helmfile version v0.106.3
    ```
-1. Configure your client to point at the `default` namespace (or any other namespace you'd like).
+1. Start a minikube cluster and run `helm init`
+
 
 Scenario 1: Failed Upgrade
 ------------------------
@@ -39,8 +47,8 @@ New resources created during failed upgrade get rolled back, it is possible to u
    my-release      1               Wed Apr  1 23:03:41 2020        DEPLOYED        local-chart-0.1.0       1.0             default  
    ```
 1. Validate serviceaccount resource created and deploy not created:
-   ```   
-   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   ```
+   $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
    NAME                                    SECRETS   AGE
    serviceaccount/my-release-local-chart   1         22s
    
@@ -68,7 +76,7 @@ New resources created during failed upgrade get rolled back, it is possible to u
    ```
     1. You can try running the kubectl get command in another shell, while Helm's waiting for the deploy to try to finish:
        ```
-       $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+       $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
        NAME                             TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
        service/my-release-local-chart   ClusterIP   10.110.35.75   <none>        80/TCP    1s
        
@@ -81,7 +89,7 @@ New resources created during failed upgrade get rolled back, it is possible to u
        ```
 1. Validate the new resources do not exist:
    ```
-   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
      
    NAME                                    SECRETS   AGE
    serviceaccount/my-release-local-chart   1         100s
@@ -98,7 +106,7 @@ New resources created during failed upgrade get rolled back, it is possible to u
    ```
 1. Validate the service now exists, without a deploy:
    ```
-   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
    NAME                             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
    service/my-release-local-chart   ClusterIP   10.105.231.55   <none>        80/TCP    22s
    
@@ -134,7 +142,7 @@ All resources created during install get left - no rollbacks. Helm delete requir
    ```
 1. Validate all resources are created ☹️:
    ```   
-   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
    NAME                             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
    service/my-release-local-chart   ClusterIP   10.103.181.15   <none>        80/TCP    75s
    
@@ -175,7 +183,7 @@ All resources created during install get left - no rollbacks. Helm delete requir
    $ helm delete --purge my-release
    release "my-release" deleted
 
-   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
    No resources found in default namespace.
    ```
 1. Try install again, but without deployment enabled:
@@ -190,7 +198,7 @@ All resources created during install get left - no rollbacks. Helm delete requir
    NAME            REVISION        UPDATED                         STATUS          CHART                   APP VERSION     NAMESPACE
    my-release      1               Wed Apr  1 23:30:06 2020        DEPLOYED        local-chart-0.1.0       1.0             default
 
-   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
    NAME                             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
    service/my-release-local-chart   ClusterIP   10.105.231.55   <none>        80/TCP    22s
 
@@ -229,7 +237,7 @@ All resources created during install get removed with `--atomic`, and users are 
    ```
 1. Validate all resources were deleted 😀️:
    ```   
-   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   $ kubectl -n default get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
    No resources found in default namespace.
    ```
 1. Try to install again:
