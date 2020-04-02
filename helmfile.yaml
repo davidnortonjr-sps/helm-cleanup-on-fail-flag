@@ -1,0 +1,9 @@
+helmDefaults:
+  wait: true
+  timeout: 20
+
+releases:
+  - name: my-release
+    namespace: default
+    chart: ./local-chart
+
