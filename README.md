@@ -1,7 +1,15 @@
 helm-cleanup-on-fail-flag
 =========================
 
-Testing the --cleanup-on-fail flag
+Testing the --cleanup-on-fail flag. This is a flag for `helm upgrade`, that 
+
+Rather than specify this on a project-by-project basis in helmfile.yaml, I think we'd specify it in our pipeline's 
+helmfile command with `--args "--cleanup-on-fail"`.
+
+The gist of our testing revealed that:
+1. It works great for allowing devs to redeploy after a failed _upgrade_.
+2. It doesn't do anything for us when the first deploy (a helm _install_) fails. Incidentally, `--atomic` seemed to 
+help out there, but I don't know what other side effects that might have.
 
 Before you do anything:
 
