@@ -199,3 +199,54 @@ All resources created during install get left - no rollbacks. Helm delete requir
 
    # ^^ NOTE: no deploy listed
    ```
+   
+
+Scenario 3: Failed Install With Atomic
+--------------------------------------
+
+All resources created during install get removed with `--atomic`, and users are able to carry on with future deploys without issue
+
+1. Ensure old release gets deleted:
+   ```
+   $ helm delete --purge my-release
+   release "my-release" deleted
+
+   $ helm ls -a my-release
+   <no results>  
+   ```
+1. Install with deployment and service enabled: 
+   ```
+   $ helmfile sync --set deploymentEnabled=true --set serviceEnabled=true --args "--cleanup-on-fail --atomic"
+   ... <failure> ...
+   INSTALL FAILED
+   PURGING CHART
+   Error: release my-release failed: timed out waiting for the condition
+   Successfully purged a chart!
+   ...
+   
+   $ helm ls -a my-release
+   <no results>  
+   ```
+1. Validate all resources were deleted 😀️:
+   ```   
+   $ kubectl get service,serviceaccount,deploy -l app.kubernetes.io/instance=my-release
+   No resources found in default namespace.
+   ```
+1. Try to install again:
+   ```
+   $ helmfile sync --args "--cleanup-on-fail --atomic"
+   ... <success> ...
+   
+   $ helm ls my-release
+   NAME            REVISION        UPDATED                         STATUS          CHART                   APP VERSION     NAMESPACE
+   my-release      1               Thu Apr  2 14:03:10 2020        DEPLOYED        local-chart-0.1.0       1.0             default  
+   ```
+1. Try to upgrade again:
+   ```
+   $ helmfile sync --set serviceEnabled=true --args "--cleanup-on-fail --atomic"
+   ... <success> ...
+   
+   $ helm ls my-release
+   NAME            REVISION        UPDATED                         STATUS          CHART                   APP VERSION     NAMESPACE
+   my-release      2               Thu Apr  2 14:13:36 2020        DEPLOYED        local-chart-0.1.0       1.0             default  
+   ```
